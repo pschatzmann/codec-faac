@@ -1,0 +1,403 @@
+2.2 (Sep 29, 2026)
+
+	[ Robert Kausch ]
+	* build: honor an explicit b_lto=false; drop __stdcall on x86 Windows
+
+	[ Nils Schimmelmann ]
+	* Bump the ABI to 2: faac_params_init() takes the caller's struct size
+	* HE-AAC auto range 8-32 kbps per channel at 44.1 and 48 kHz (was
+	  12-28), narrowing to 8-12 at 32 kHz; VBR up to -q 75 (was 60);
+	  HE-AAC v1 for multichannel layouts up to 8 channels, with one SBR
+	  fill element per SCE/CPE instead of one per frame
+	* Rate control: signed bit account for ABR; a real bit reservoir for CBR
+	  behind `--cbr`
+	* Refit the ABR bandwidth curve from a sweep: a wider core at 24-56 kbps
+	  stereo and every cutoff on the band grid reachable, where a double
+	  snap had left seven
+	* VBR codes at the top of the bandwidth curve (18750 Hz) instead of the
+	  full band; `-q` and `-b` are exclusive; `-q` documented as a constant
+	  quantizer quality, 1..5000, without bitrate anchors that drift
+	* SBR: reconstruction toward 20 kHz; noise floor -18 dB; log-spaced band
+	  table by rate; bs_stop_freq signals a k2 decoders actually accept;
+	  envelopes measured over the slots the decoder applies them to, coded
+	  in 3 dB steps, with two per frame without a transient from 17 kbps
+	  per channel
+	* Stereo: joint-stereo policy by rate; intensity on long windows below
+	  40 kbps per channel, L/R on short windows below the crossover from 80;
+	  short-window grouping and masking targets reworked; the sparsity mute
+	  that zeroed a quiet unjoined channel's bands is gone; M/S codes the
+	  side channel instead of dropping it and quantizes both halves against
+	  the L/R level; long windows take it on every band from 32 kbps per
+	  channel (24 on HE-AAC), short windows and HE-AAC at 20-24 kbps per
+	  channel only below 1-2 kHz
+	* A right-channel intensity band over a left PNS band is coded as PNS,
+	  so decoders that apply intensity first don't play it silent
+	* TNS on by default; frames screened before LPC analysis
+	* Block switching: the HE core runs its own transient detector instead
+	  of following SBR's, and both cores judge a sub-block's attack against
+	  a running level instead of only its neighbour, so dense stationary
+	  material stops defaulting to short windows
+	* Quantizer: short blocks take the same loudness target as long ones
+	  instead of 0.45x coarser, so transient frames stop losing bands to
+	  PNS; from 56 kbps per channel the treble de-emphasis is steeper, so
+	  the low bands get the margin; bands far below the frame's energy
+	  are allowed coarser targets; kernels take band widths in quads and
+	  vectorize fully, and grouping band energy is summed in four lanes
+	* HUFF2: choose section codebooks jointly across each window group,
+	  accounting for both codeword and section-header costs
+	* Enforce the ISO/IEC 14496-3 per-channel frame ceiling and bitrate
+	  limits; map channel counts to the standard AudioSpecificConfig/ADTS
+	  channel configurations and reject non-standard counts
+	* PNS and the MPEG version are now resolved by the encoder instead of
+	  the caller: `faac_params` drops `pns_level` for a `use_pns` flag,
+	  `faac_encoder_info` reports the resolved `mpeg_version`, and an
+	  explicit MPEG-2 request silently upgrades to MPEG-4 for HE-AAC;
+	  `faac` takes `--no-pns` in place of `--pns <0..10>`
+	* frontend: MP4 output by default with detection from the extension;
+	  24-bit packed PCM input; 64-bit mdat and duration; track language;
+	  UTF-8 and wide-character paths on CLI and Win32 GUI; iTunes gapless
+	  metadata (iTunSMPB); shared encoding engine and MP4 output in the GUI;
+	  GUI opens on ABR at 128 kbps; optional end-of-encode diagnostics;
+	  a PCM WAV could be read as float from an uninitialised header field;
+	  endian conversion utilities unified, fixing a WORDS_BIGENDIAN check
+	  that only worked because the macro happened to be undefined rather
+	  than 0; help text and the man page corrected throughout
+	* mp4write: container timing, HE-AAC sample rate declaration and gapless
+	  fixes; GUI PCM clipping fix
+	* HE-AAC: pad the pipeline delay to an even multiple of the core frame,
+	  so gapless-aware decoders trim the right sample count at both ends
+	* SBR: parameter resolution in VBR, tail drained on flush, psPresentFlag
+	  for mono, less per-frame work in the writer
+	* Pipeline draining during flush on short streams
+	* Fix a 64 kHz short-window scalefactor band width table that summed
+	  to 124 spectral lines instead of 128
+	* Build the lookup tables and FFT twiddle factors shared between
+	  encoder handles once per process instead of per open, so independent
+	  handles can be opened concurrently without racing each other's tables
+	* fft: replace the bit-reversed DIF kernel and its reorder pass with a
+	  self-sorting Stockham kernel that lands in natural order directly
+	* filtbank/channels: inline the window dispatch and simplify grouping
+	  bit accounting for vectorization
+	* Drop the never-selected KBD window from the filter bank
+	* Drop dead count mode from bitstream writer
+	* build: force-include config.h instead of per-file guards; drop the
+	  cold/noinline hints on the HE-AAC frame path so PGO and -Os/-O3
+	  make the call instead of a fixed attribute
+	* frontend: show the git commit hash in `-h`, the GUI, verbose logging,
+	  and the MP4 tag; `-h` reports the runtime libfaac version, not the
+	  compile-time one
+
+2.1 (Aug 18, 2026)
+
+	[ Nils Schimmelmann ]
+	* Honor ABI backward compatibility for faac_params
+	* SBR: align payload timing with core audio frames
+	* Add optional hard per-frame peak-bitrate limiter (`--cap-rate`)
+	* HUFF2: size both books of a codebook pair in one pass
+
+2.0 (Jul 20, 2026)
+
+	[ Fabian Greffrath ]
+	* Remove obsolete pkg-config template
+	* Restrict LTO to the shared library only
+
+	[ Orbis Security AI ]
+	* filtbank: Fix an out-of-bounds `memcpy` in `FilterBank()` that used
+	  `FRAME_LEN` instead of `BLOCK_LEN_LONG` for the overlap buffer copies
+
+	[ Nils Schimmelmann ]
+	* Harden input parsing and guard against allocation failures.
+	* Replace the classic `faacEnc*` C API with a new `faac_*` API in
+	  `faac.h`: parameters supplied once to `faac_encoder_open()`, uniform
+	  `faac_status` error reporting, resolved-property queries, and
+	  library-owned AudioSpecificConfig. The legacy `faacEnc*` surface and
+	  `faaccfg.h` are removed; the encoder core they exposed is now internal.
+	  SONAME bumped to 1 (libfaac.so.1). `faac.h` now defines
+	  `FAAC_VERSION_MAJOR`/`MINOR`/`PATCH`, tracking the SONAME, so callers
+	  can detect the new API at compile time (`FAAC_VERSION_MAJOR >= 1`).
+	* frontend: Port `faac` and the Win32 GUI to the new API; this fixes the
+	  AudioSpecificConfig memory leak on the MP4 output path.
+	* Add HE-AAC v1 (AAC-LC core + Spectral Band Replication) encoding via
+	  `FAAC_OBJ_HE_AAC_V1`, or `FAAC_OBJ_AUTO`, which picks LC or HE-AAC from
+	  the bitrate. The SBR core runs dual-rate (half-rate core, 2048-sample
+	  frame); `faac_encoder_get_info()` reports the full output rate and frame
+	  size so callers need no SBR-specific handling. CLI:
+	  `--object-type lc|he-aac-v1|auto`.
+	* stereo: Add Mixed Mode joint stereo (`--joint 3`) as the new default:
+	  per scale-factor band, picks IS above 5.5 kHz, M/S where channels are
+	  correlated, or L/R otherwise. Fix a midside band-silencing bug that
+	  produced L=R=0 on decode, guard against negative rounding before
+	  sqrt, and keep IS available at low sample rates.
+	* quantize: Restore short-window masking penalty, floor masking
+	  targets in quiet bands, drop stale tonal scaling in bmask, and keep
+	  `global_gain` a valid regular scalefactor -- fixing energy drops,
+	  quiet-band artifacts, and a decoder out-of-range error.
+	* tns: Cap TNS filter order to 12 to fix AAC-LC decoder rejections and
+	  audio dropouts in FFmpeg/FAAD.
+	* Retire the never-implemented MAIN/SSR/LTP object types across
+	  filtbank, frame, and the frontend, and collapse the single-model
+	  psychoacoustic vtable into direct calls.
+	* Fix a lookahead regression that had truncated the encoder's
+	  lookahead to an effective 1-frame delay, causing pre-echo artifacts
+	  and broken stereo coherence; then simplify the lookahead into a
+	  unified per-channel FIFO and energy timeline, replacing the ad hoc
+	  sampleBuff/next*SampleBuff/overlapBuff/prevSamples buffers.
+	* Relicense: rewrite stereo, quantize, channels, bitstream, filtbank,
+	  tns, huffdata, huff2, and the MP4 output code as original work under
+	  LGPL-2.1-or-later, and drop the matching MPEG reference-code preamble
+	  from README.md, --license, and docs/. Every source file is now free
+	  software. Update the license header itself from GNU Library GPL to
+	  Lesser GPL wording.
+	* fft: Replace the radix-2 FFT with radix-4 decimation-in-frequency as
+	  the sole implementation and precompute MDCT twiddles, for ~18%
+	  faster encode versus the radix-2 baseline.
+	* Standardize libfaac on single-precision floating point: drop the
+	  `floating-point` Meson build option and `faac_real.h`, and use
+	  `float`/`sinf`/`cosf`/`sqrtf` directly throughout the per-sample hot
+	  path. One-time init-time table generators (FFT/MDCT/SBR twiddles,
+	  window shapes, quantizer limits) keep `double` precision, where it's
+	  free. Benchmarked MOS-neutral versus the prior double-precision path.
+	* blockswitch: Move short-window detection to the time domain.
+	* Performance passes: reuse a shared work buffer for filtbank's MDCT
+	  scratch, and optimize TNS and stereo IS-gate hot paths.
+	* frame: Buffer encoder input so any input chunk size works.
+	* bitstream: Stop embedding the libfaac version string.
+	* build: Fix compiler warnings and transition to C11.
+	* frontend: Add a `--creation-time` flag for configurable MP4
+	  timestamps, vendor mingw-w64 wingetopt as a minimal-diff getopt
+	  fallback for MSVC builds, and keep TNS off by default in the GUI to
+	  match the CLI.
+
+1.50 (Apr 16, 2026)
+
+	[ Fabian Greffrath ]
+	* Build quantize_sse library with hidden symbols
+	* Don't call `exit()` from the library
+	* Define some more `default_options` in Meson build
+	* Fix some warnings in `frontend/maingui.c`
+	* Default to `buildtype=release` in Meson build
+	* Initialize `data` variable in `huffcode()`
+	* Remove the faulty `HAVE_STRCASECMP` check and other pointless header checks
+	* CI: Let Meson build set `CFLAGS`
+
+	[ Nils Schimmelmann ]
+	* Disallow PNS in MPEG-2 mode to match spec
+	* frontend: Change default to MPEG-4 as MPEG-2 is obsolete
+	* Add `max-channels` option to change `MAX_CHANNELS` from 64
+	* Fix PNS to stay on in `JOINT_MS` for low-bitrate accuracy
+	* Replace redundant `cpe`, `sce`, and `lfe` boolean flags in `ChannelInfo` with an `enum`
+	* Reduce `MAX_CHANNELS` to 8 for ADTS compliance
+	* tns: Prevent division-by-zero or instability on highly correlated signals
+	* Implement MOS-optimized bandwidth calculation
+	* Fine-tune rate controller to restore bitrate accuracy
+	* Fix channel-specific group metadata in joint-stereo
+	* Enable link-time optimization (LTO) in Meson build
+	* stereo: Fix undefined behaviour in intensity stereo for degenerate bands
+	* Fix scalefactor delta overflows to comply with AAC spec (ISO 14496-3)
+	* quantize: Pre-clamp scalefactor deltas to fix encoder/decoder mismatch
+
+1.40 (Mar 17, 2026)
+
+	[ tatsuz ]
+	* Fix compilation with Visual Studio
+
+	[ enWILLYado ]
+	* Fix SIMD calls
+
+	[ David Fort ]
+	* Add meson as build system
+
+	[ KokonoeTooru ]
+	* Meson: Install faac executable
+
+	[ Fabian Greffrath ]
+	* CI: fix artifact path
+	* Remove autoconf/automake build system
+	* Remove plugins stuff, unmaintained for decades
+	* Remove MSVC projects, deprecated in favour of meson
+	* Do not check for unused headers
+	* Generalize OS check in CI rule
+	* Remove redundant defines
+	* Make `faacgui` usable again
+	* Report library version on version mismatch
+	* Maintain library SONAME version 0.0.0
+	* Build both static and shared library by default
+	* Properly declare symbol visibility as hidden
+
+	[ Nils Schimmelmann ]
+	* Add options to disable DRM and opt for single floating-point precision
+	* CI: add native MSVC build and fix Windows compatibility
+	* Remove dead code
+	* Optimize FFT reordering by combining real and imaginary passes
+	* Optimize FFT performance
+	* CI: update GitHub Actions and add Dependabot configuration
+	* Refactor quantizer for portable C and extensible SIMD dispatch
+	* Optimize memory allocation and unify MDCT implementation
+	* Optimize MDCT by removing conditional branches and hoisting logic
+	* Rrefactor the hot path for writing bits to the output stream
+	* Remove Digital Radio Mondiale (DRM) support
+
+1.31.1 (Mar 03, 2025)
+
+	[ Fabian Greffrath ]
+	* Reduce autoconf requirement back down to 2.69
+	* Reformat configure.ac for the ac2ver.exe hack to work
+	* Upload Windows artifacts
+
+1.31 (Feb 28, 2025)
+
+	[ Tatsuya Suzuki ]
+	* updated Visual Studio projects to VS 2019
+	* main.c : progress report keeps alignment when encoding a large file
+	* project/msvc : cleanup, fixes and changes
+
+	[ Christopher Degawa ]
+	* frontend: fix out-of-root build
+
+	[ Fabian Greffrath ]
+	* add a pkg-config file
+	* avoid division by zero
+	* Remove #pragma pack from faacEncStruct (thanks Locutus of Borg)
+	* Reduce memory (thanks xnvi)
+	  + Remove `BwpInfo bwpInfo` from `struct CoderInfo`
+	  + Remove `nextSampleBuff[]` and `next2SampleBuff[]` from `struct faacEncStruct`
+	* tns: Initialize `rArray[]` variable
+	* update autoconf.ac and friends
+	* do not pass add-stdcall-alias option to clang
+	* always build both the regular and the DRM library
+	* fix cppcheck warnings
+	* add some basic CI
+	* fix compilation with clang on Windows
+	* Append INSTALL to README
+
+	[ Steve Fosdick ]
+	* Add album artist and various sort order MP4 tags
+
+	[ Aaron Boxer ]
+	* set libfaac library name to "faac" rather than "libfaac"
+
+	[ Frank ]
+	* Error C2065 (add #define _USE_MATH_DEFINES)
+
+	[ pine3ree ]
+	* Allow genre-id up to 255
+
+1.30 (Oct 16, 2019)
+
+	[ Robert Kausch ]
+	* Fix Joint Stereo coding
+
+	[ Krzysztof Nikiel ]
+	* Code cleanup and compilation fixes
+	* Fix endianness conversion functions
+
+	[ Takashi Yoshi ]
+	* Fix compilation with GCC < 4.6
+	* Fix compilation on big endian systems
+
+	[ Fabian Greffrath ]
+	* Fix division by zero errors
+	* Fix compilation with GCC <= 4.7.3
+	* Change pointer type for proper arithmetics
+	* Fix logic error in compiler detection
+	* Revert back to some more generic SSE2 code
+	* Fix a memory leak
+	* Fix some cppcheck warnings in the Cfaac code
+	* Check index ranges before dereferencing book arrays (CVE-2018-19886)
+	* Clean up stdint.h header inclusions
+	* Consistently use stdint.h types
+
+	[ Michael Fink ]
+	* Update Visual Studio 2017 projects
+	* Add stdint.h header inclusions
+	* Port over ac2ver tool from faad2 to generate PACKAGE_VERSION
+	  when compiling with Visual Studio
+
+	[ Eugène Filin ]
+	* Memory allocations redefined
+
+1.29.9.2 (Nov 14, 2017)
+
+	* fixed max MP4 bitrate calculation
+
+1.29.9 (Nov 2, 2017)
+
+	* initial version of PNS coding
+	* Intensity Stereo coding
+	* more speed improvements
+	* finer bandwidth/cutoff setting (doesn't work with PNS)
+	* fixed more bugs
+	* rewritten mid/side coding
+	* fixed bug in blockswitch
+
+1.29.8 (Oct 15, 2017)
+
+	* changed default mode to ABR 64kbps/channel
+	* implemented short windows grouping
+	* new huffman coder
+	* SSE quantizer
+	* modified functioning of ABR mode (-b option)
+	* improved autotools support
+	* allowed even higher bitrates, including ADTS
+	* framebuffer size bug fixed
+	* removed broken object types: Main and LTP
+	* some mp4 atoms fixed for better compalibility
+	* stdin seek bug fixed
+
+1.29.7 (Aug 22, 2017)
+
+	* quantizer tweaked to better support high bitrates
+	* allow higher quality for mp4 files (-q 5000 max)
+	* removed mid frequency boost (it turned out useless)
+	* cutoff frequency adjusted to fully utilize upper band
+	* --help-long option removed, it was just an alias for -H
+	* -b option bug fixed
+
+1.29.6 (Aug 18, 2017)
+
+	- quality related bug fixed
+
+1.29.5 (Aug 17, 2017)
+
+	- updated manpage
+	- check if output file exists; --overwrite option added
+	- help/usage options reorganized
+	- block switching is now tuned to match quality/bitrate
+	- give more quality to lower frequancies (less to highs)
+	- quantizer updated again
+
+1.29.4 (Aug 14, 2017)
+
+	- rewritten quantizer: faster, diffrerent quality, different bitrates
+	- ftyp atom: set brands like itunes does, shoud be more compatible
+	  with picky tools
+	- new option(--tag) to add named tags (iTunes '----')
+	- faster and better short/long window type switch
+	- Don't build DRM(Digital Radio Mondiale) by default.
+	  Use ./configure --enable-drm to build DRM version.
+	- fixed bugs
+	  * rounding in QuantizeReflectionCoeffs (tns.c)
+	  * use +60 value for scalefactor.
+	  * use clipped diff instead of original value (huffman.c)
+
+1.29.3 (Jul 21, 2017)
+
+	- MP4 tag options improved
+	- fixed MP4 'meta' atom bug
+	- new option to set verbosity (-v0 to silence output)
+
+1.29.2 (Jul 17, 2017)
+
+	- new mp4 output code
+
+1.29 (Jul 4, 2017)
+
+	- various patches applied and bugs fixed
+
+1.28 (Feb 5, 2009)
+
+	* Prevent out of range scalefactors
+	* Updated to latest mpeg4ip mp4 file format library
+	* Added -s option to make the encoder output optimized mp4 layout
+	* Improved JPEG detection for album art
+	* Lot's of compilation issues solved
